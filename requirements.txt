@@ -1,8 +1,12 @@
 chromadb>=0.5.23
+fastapi>=0.115.6
 google-generativeai>=0.8.3
 langchain-community>=0.3.13
 langchain-core>=0.3.28
 langchain-google-genai>=2.0.8
 langchain-text-splitters>=0.3.4
+python-multipart>=0.0.20
 pymupdf>=1.25.1
+rank-bm25>=0.2.2
 streamlit>=1.41.1
+uvicorn[standard]>=0.34.0

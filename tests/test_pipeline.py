@@ -53,3 +53,23 @@ def test_ingest_retrieve_and_answer_without_external_api(tmp_path):
     assert "grounded" in answer.text.lower()
     assert answer.citations
     assert answer.latency_ms >= 0
+
+
+def test_hybrid_retrieval_uses_bm25_signal(tmp_path):
+    text = (
+        "Alpha section explains neural retrieval and embeddings. "
+        "Beta section describes sparse keyword matching with bm25 ranking. "
+        "Gamma section covers mermaid flowcharts for methodology review. "
+    ) * 12
+    rag = RAGPipeline(
+        embeddings=HashEmbeddings(),
+        llm=EchoLLM(),
+        persist_directory=tmp_path,
+        retrieval_k=3,
+    )
+
+    rag.ingest_text(text)
+    docs = rag.retrieve("bm25 sparse keyword matching")
+
+    assert docs
+    assert any("bm25" in doc.page_content.lower() for doc in docs)

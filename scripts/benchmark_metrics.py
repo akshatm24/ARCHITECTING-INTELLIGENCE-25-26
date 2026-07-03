@@ -50,7 +50,7 @@ class StaticLLM:
 
 SAMPLE_SECTIONS = [
     "Methodology: The system extracts PDF text, splits it into overlapping chunks, creates Google-style embeddings, and stores vectors in ChromaDB for retrieval augmented generation.",
-    "Retrieval: User questions are embedded and matched against the ChromaDB index. The highest scoring chunks become the only context used by the answer prompt.",
+    "Retrieval: User questions are embedded and matched against the ChromaDB index. Sparse BM25 keyword matching rescues exact scientific terminology and method names.",
     "Grounding: The answer prompt requires page citations and instructs the model to say when evidence is missing, reducing hallucination risk.",
     "Visualization: Gemini generates Mermaid flowcharts and mind maps to summarize methodology, experiments, setup, results, and limitations.",
     "Research workflow: Scientists can upload dense papers, ask conversational questions, generate summaries, and inspect cited chunks.",
@@ -67,7 +67,12 @@ QUERIES = [
 
 
 def main() -> None:
-    sample_text = "\n\n".join(section * 16 for section in SAMPLE_SECTIONS)
+    synthetic_papers = 120
+    sample_text = "\n\n".join(
+        f"Paper {paper_id}. {section}"
+        for paper_id in range(1, synthetic_papers + 1)
+        for section in SAMPLE_SECTIONS
+    )
     rag = RAGPipeline(embeddings=KeywordEmbeddings(), llm=StaticLLM(), retrieval_k=4)
 
     ingest_start = time.perf_counter()
@@ -75,19 +80,31 @@ def main() -> None:
     ingest_ms = (time.perf_counter() - ingest_start) * 1000
 
     latencies = []
-    hits = 0
+    hybrid_hits = 0
+    vector_hits = 0
     for label, query in QUERIES:
         start = time.perf_counter()
         docs = rag.retrieve(query)
         latencies.append((time.perf_counter() - start) * 1000)
-        joined = " ".join(doc.page_content.lower() for doc in docs)
-        hits += int(label in joined or query.split()[0] in joined)
+        hybrid_joined = " ".join(doc.page_content.lower() for doc in docs)
+        hybrid_hits += int(label in hybrid_joined or query.split()[0] in hybrid_joined)
+
+        vector_docs = rag.retriever.invoke(query)
+        vector_joined = " ".join(doc.page_content.lower() for doc in vector_docs)
+        vector_hits += int(label in vector_joined or query.split()[0] in vector_joined)
+
+    vector_hit_rate = vector_hits / len(QUERIES)
+    hybrid_hit_rate = hybrid_hits / len(QUERIES)
+    precision_lift = 0 if vector_hit_rate == 0 else ((hybrid_hit_rate - vector_hit_rate) / vector_hit_rate) * 100
 
     metrics = {
+        "synthetic_papers": synthetic_papers,
         "sample_words": len(sample_text.split()),
         "indexed_chunks": chunks,
         "benchmark_queries": len(QUERIES),
-        "retrieval_hit_rate": round(hits / len(QUERIES), 3),
+        "vector_only_hit_rate": round(vector_hit_rate, 3),
+        "hybrid_retrieval_hit_rate": round(hybrid_hit_rate, 3),
+        "hybrid_precision_lift_pct": round(precision_lift, 1),
         "index_build_ms": round(ingest_ms, 2),
         "median_retrieval_ms": round(statistics.median(latencies), 2),
         "p95_retrieval_ms": round(sorted(latencies)[int(len(latencies) * 0.95) - 1], 2),

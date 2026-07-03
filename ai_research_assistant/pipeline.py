@@ -14,6 +14,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from rank_bm25 import BM25Okapi
 
 
 class EmbeddingModel(Protocol):
@@ -89,6 +90,8 @@ class RAGPipeline:
         self.chunks: list[Document] = []
         self.vector_store: Chroma | None = None
         self.retriever = None
+        self.bm25: BM25Okapi | None = None
+        self.tokenized_chunks: list[list[str]] = []
 
         if embeddings is not None:
             self.embeddings = embeddings
@@ -106,7 +109,7 @@ class RAGPipeline:
             if not self.api_key:
                 raise ValueError("GOOGLE_API_KEY is required unless a custom LLM is supplied.")
             self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
+                model=os.getenv("GOOGLE_MODEL", "gemini-1.5-flash"),
                 temperature=0.2,
                 google_api_key=self.api_key,
             )
@@ -136,12 +139,33 @@ class RAGPipeline:
             collection_metadata={"hnsw:space": "cosine"},
         )
         self.retriever = self.vector_store.as_retriever(search_kwargs={"k": self.retrieval_k})
+        self.tokenized_chunks = [tokenize_for_bm25(chunk.page_content) for chunk in self.chunks]
+        self.bm25 = BM25Okapi(self.tokenized_chunks)
         return len(self.chunks)
 
     def retrieve(self, query: str) -> list[Document]:
-        if self.retriever is None:
+        if self.retriever is None or self.bm25 is None:
             raise RuntimeError("Ingest a document before querying.")
-        return list(self.retriever.invoke(query))
+        vector_docs = list(self.retriever.invoke(query))
+        vector_keys = {_doc_key(doc) for doc in vector_docs}
+
+        query_tokens = tokenize_for_bm25(query)
+        bm25_docs: list[Document] = []
+        if query_tokens:
+            scores = self.bm25.get_scores(query_tokens)
+            ranked_indexes = sorted(range(len(scores)), key=lambda index: scores[index], reverse=True)
+            for index in ranked_indexes[: self.retrieval_k]:
+                if scores[index] <= 0:
+                    continue
+                bm25_docs.append(self.chunks[index])
+
+        merged = vector_docs[:]
+        for doc in bm25_docs:
+            key = _doc_key(doc)
+            if key not in vector_keys:
+                merged.append(doc)
+                vector_keys.add(key)
+        return merged[: self.retrieval_k]
 
     def answer_query(self, query: str) -> Answer:
         start = time.perf_counter()
@@ -238,3 +262,15 @@ Context:
                 )
             )
         return citations
+
+
+def tokenize_for_bm25(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _doc_key(doc: Document) -> tuple[int, int, int]:
+    return (
+        int(doc.metadata.get("page", 0) or 0),
+        int(doc.metadata.get("chunk", 0) or 0),
+        int(doc.metadata.get("start_index", 0) or 0),
+    )
