@@ -1,7 +1,15 @@
 .venv/
 **/.venv/
+.env
+**/.env
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
 .pytest_cache/
 **/.pytest_cache/
 __pycache__/
 **/__pycache__/
 *.pyc
+chroma/
+.chroma/
+**/chroma/
+**/.chroma/

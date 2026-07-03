@@ -1,0 +1,15 @@
+.git
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+**/.pytest_cache
+.env
+*.pyc
+Assignments/
+Codes/
+Submissions/
+Attendance.md
+Assignments.md
+Submissions/Capstone Project/Group_2/.venv
