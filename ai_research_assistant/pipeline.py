@@ -147,7 +147,6 @@ class RAGPipeline:
         if self.retriever is None or self.bm25 is None:
             raise RuntimeError("Ingest a document before querying.")
         vector_docs = list(self.retriever.invoke(query))
-        vector_keys = {_doc_key(doc) for doc in vector_docs}
 
         query_tokens = tokenize_for_bm25(query)
         bm25_docs: list[Document] = []
@@ -159,13 +158,12 @@ class RAGPipeline:
                     continue
                 bm25_docs.append(self.chunks[index])
 
-        merged = vector_docs[:]
-        for doc in bm25_docs:
-            key = _doc_key(doc)
-            if key not in vector_keys:
-                merged.append(doc)
-                vector_keys.add(key)
-        return merged[: self.retrieval_k]
+        return dedupe_documents([*bm25_docs, *vector_docs])[: self.retrieval_k]
+
+    def retrieve_vector_only(self, query: str) -> list[Document]:
+        if self.retriever is None:
+            raise RuntimeError("Ingest a document before querying.")
+        return list(self.retriever.invoke(query))[: self.retrieval_k]
 
     def answer_query(self, query: str) -> Answer:
         start = time.perf_counter()
@@ -274,3 +272,15 @@ def _doc_key(doc: Document) -> tuple[int, int, int]:
         int(doc.metadata.get("chunk", 0) or 0),
         int(doc.metadata.get("start_index", 0) or 0),
     )
+
+
+def dedupe_documents(docs: list[Document]) -> list[Document]:
+    seen: set[tuple[int, int, int]] = set()
+    unique: list[Document] = []
+    for doc in docs:
+        key = _doc_key(doc)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(doc)
+    return unique

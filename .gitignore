@@ -6,6 +6,8 @@
 **/.streamlit/secrets.toml
 .pytest_cache/
 **/.pytest_cache/
+.cache/
+**/.cache/
 __pycache__/
 **/__pycache__/
 *.pyc
